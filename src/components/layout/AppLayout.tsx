@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquarePlus,
@@ -8,8 +8,11 @@ import {
   Sparkles,
   Bell,
   Search,
+  X,
+  ChevronRight,
 } from "lucide-react";
 import { useFeedbackStore } from "@/store/feedbackStore";
+import { feedbackTypeMap, statusMap, cn } from "@/utils/format";
 
 const navItems = [
   { to: "/submit", label: "反馈入口", icon: MessageSquarePlus, desc: "学员提交反馈" },
@@ -23,25 +26,64 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchText, setSearchText] = useState("");
+  const [showResults, setShowResults] = useState(false);
+  const [searchResults, setSearchResults] = useState<typeof feedbacks>([]);
+  const searchRef = useRef<HTMLDivElement>(null);
   const pendingCount = feedbacks.filter((f) => f.status === "pending").length;
 
   const pageTitle =
     navItems.find((n) => location.pathname.startsWith(n.to))?.label ?? "反馈管理";
 
-  const handleSearch = () => {
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const doSearch = (kw: string) => {
+    const trimmed = kw.trim();
+    if (!trimmed) { setSearchResults([]); setShowResults(false); return; }
+    const lower = trimmed.toLowerCase();
+    const matches = feedbacks.filter(
+      (f) =>
+        f.ticketNo.toLowerCase().includes(lower) ||
+        f.studentName.includes(trimmed) ||
+        f.courseName.includes(trimmed)
+    );
+    setSearchResults(matches);
+    setShowResults(true);
+  };
+
+  const handleSearchChange = (val: string) => {
+    setSearchText(val);
+    if (val.trim().length >= 2) {
+      doSearch(val);
+    } else {
+      setShowResults(false);
+      setSearchResults([]);
+    }
+  };
+
+  const handleSearchSubmit = () => {
     const kw = searchText.trim();
     if (!kw) return;
-    const match = feedbacks.find(
-      (f) =>
-        f.ticketNo.toLowerCase().includes(kw.toLowerCase()) ||
-        f.studentName.includes(kw)
-    );
-    if (match) {
-      navigate(`/tickets/${match.id}`);
-    } else {
-      navigate("/tickets");
-      useFeedbackStore.getState().setFilters({ keyword: kw });
-    }
+    doSearch(kw);
+  };
+
+  const goToResult = (id: string) => {
+    navigate(`/tickets/${id}`);
+    setShowResults(false);
+    setSearchText("");
+  };
+
+  const goToTicketList = () => {
+    navigate("/tickets");
+    useFeedbackStore.getState().setFilters({ keyword: searchText.trim() });
+    setShowResults(false);
     setSearchText("");
   };
 
@@ -130,16 +172,77 @@ export default function AppLayout() {
             </h1>
           </div>
 
-          <div className="flex-1 max-w-md ml-8">
+          <div className="flex-1 max-w-md ml-8" ref={searchRef}>
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
               <input
                 placeholder="搜索工单编号、学员姓名、课程名…"
                 value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSearchSubmit(); }}
+                onFocus={() => { if (searchResults.length > 0) setShowResults(true); }}
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/80 border border-ink-100 text-sm text-ink-700 placeholder:text-ink-300 focus:outline-none focus:ring-4 focus:ring-moss-500/10 focus:border-moss-300 transition"
               />
+              {searchText && (
+                <button type="button" onClick={() => { setSearchText(""); setShowResults(false); setSearchResults([]); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-ink-200 hover:bg-ink-300 flex items-center justify-center text-white transition">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+              {showResults && (
+                <div className="absolute top-full left-0 right-0 mt-2 card shadow-pop z-50 max-h-[360px] overflow-y-auto animate-popIn">
+                  <div className="p-3 border-b border-cream-200 flex items-center justify-between">
+                    <span className="text-xs font-medium text-ink-500">
+                      {searchResults.length > 0 ? `找到 ${searchResults.length} 条结果` : "未找到匹配结果"}
+                    </span>
+                    {searchResults.length > 0 && (
+                      <button type="button" onClick={goToTicketList}
+                        className="text-xs font-medium text-moss-600 hover:text-moss-700 transition">
+                        在列表中查看全部 →
+                      </button>
+                    )}
+                  </div>
+                  {searchResults.length === 0 ? (
+                    <div className="py-8 text-center">
+                      <Inbox className="w-8 h-8 text-ink-300 mx-auto mb-2" />
+                      <p className="text-sm text-ink-400">试试其他关键词</p>
+                    </div>
+                  ) : (
+                    <div className="py-1">
+                      {searchResults.slice(0, 8).map((fb) => {
+                        const ti = feedbackTypeMap[fb.type], si = statusMap[fb.status];
+                        return (
+                          <button key={fb.id} type="button" onClick={() => goToResult(fb.id)}
+                            className="w-full text-left px-4 py-3 hover:bg-moss-50/60 transition-colors flex items-center gap-3 group">
+                            <div className="w-8 h-8 rounded-full bg-cream-200 text-ink-700 text-[10px] font-semibold flex items-center justify-center shrink-0">
+                              {fb.studentAvatar}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="font-mono text-xs font-semibold text-moss-700">{fb.ticketNo}</span>
+                                <span className={cn("chip !py-0 !text-[10px]", ti.color, "border")}>{ti.label}</span>
+                                <span className={si.color}>{si.label}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-ink-500">
+                                <span>{fb.studentName}</span>
+                                <span className="text-ink-300">·</span>
+                                <span className="truncate max-w-[180px]">{fb.courseName}</span>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-ink-300 group-hover:text-moss-600 transition shrink-0" />
+                          </button>
+                        );
+                      })}
+                      {searchResults.length > 8 && (
+                        <button type="button" onClick={goToTicketList}
+                          className="w-full text-center py-2.5 text-xs font-medium text-moss-600 hover:text-moss-700 hover:bg-moss-50/40 transition">
+                          还有 {searchResults.length - 8} 条结果，在列表中查看 →
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

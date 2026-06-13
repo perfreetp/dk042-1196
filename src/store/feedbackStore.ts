@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import type { Feedback, Comment, VisitRecord, CoursewareLink, TicketStatus, UrgencyLevel, FeedbackSource } from "@/types";
+import { persist } from "zustand/middleware";
+import type { Feedback, Comment, VisitRecord, CoursewareLink, TicketStatus, UrgencyLevel, FeedbackSource, Student, Course } from "@/types";
 import { feedbacks as mockFeedbacks } from "@/mock/feedbacks";
 import { students as mockStudents } from "@/mock/students";
 import { courses as mockCourses } from "@/mock/courses";
 import { analyticsData } from "@/mock/analytics";
-import type { Student, Course } from "@/types";
 
 interface FilterState {
   status?: TicketStatus | "all";
@@ -53,136 +53,147 @@ interface FeedbackState {
 const generateId = () => Math.random().toString(36).slice(2, 10);
 const now = () => new Date().toISOString();
 
-export const useFeedbackStore = create<FeedbackState>((set, get) => ({
-  feedbacks: [...mockFeedbacks],
-  students: [...mockStudents],
-  courses: [...mockCourses],
-  analytics: analyticsData,
-  filters: { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all" },
-  selectedIds: [],
+const defaultFilters: FilterState = { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all" };
 
-  setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
-  resetFilters: () =>
-    set({ filters: { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all" } }),
-  toggleSelected: (id) =>
-    set((s) => ({
-      selectedIds: s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id],
-    })),
-  clearSelected: () => set({ selectedIds: [] }),
-  selectAllVisible: (ids) =>
-    set((s) => ({
-      selectedIds: ids.every((id) => s.selectedIds.includes(id))
-        ? s.selectedIds.filter((x) => !ids.includes(x))
-        : Array.from(new Set([...s.selectedIds, ...ids])),
-    })),
+export const useFeedbackStore = create<FeedbackState>()(
+  persist(
+    (set, get) => ({
+      feedbacks: [...mockFeedbacks],
+      students: [...mockStudents],
+      courses: [...mockCourses],
+      analytics: analyticsData,
+      filters: { ...defaultFilters },
+      selectedIds: [],
 
-  getFeedback: (id) => get().feedbacks.find((f) => f.id === id),
-  getStudent: (id) => get().students.find((s) => s.id === id),
+      setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
+      resetFilters: () => set({ filters: { ...defaultFilters } }),
+      toggleSelected: (id) =>
+        set((s) => ({
+          selectedIds: s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id],
+        })),
+      clearSelected: () => set({ selectedIds: [] }),
+      selectAllVisible: (ids) =>
+        set((s) => ({
+          selectedIds: ids.every((id) => s.selectedIds.includes(id))
+            ? s.selectedIds.filter((x) => !ids.includes(x))
+            : Array.from(new Set([...s.selectedIds, ...ids])),
+        })),
 
-  updateStatus: (id, status) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id ? { ...f, status, closedAt: status === "closed" ? now() : f.closedAt } : f
-      ),
-    })),
-  assignTo: (id, assignee) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id ? { ...f, assignee, assigneeAvatar: assignee.slice(0, 2).toUpperCase() } : f
-      ),
-    })),
-  setUrgency: (id, urgency) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, urgency } : f)),
-    })),
-  setCategory: (id, category) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, category } : f)),
-    })),
-  setPromisedAt: (id, date) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, promisedAt: date } : f)),
-    })),
-  setInternalNote: (id, note) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, internalNote: note } : f)),
-    })),
+      getFeedback: (id) => get().feedbacks.find((f) => f.id === id),
+      getStudent: (id) => get().students.find((s) => s.id === id),
 
-  addComment: (id, comment) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id
-          ? { ...f, comments: [...f.comments, { ...comment, id: generateId(), createdAt: now() }] }
-          : f
-      ),
-    })),
-  addVisit: (id, visit) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id ? { ...f, visits: [...f.visits, { ...visit, id: generateId(), createdAt: now() }] } : f
-      ),
-    })),
-  removeVisit: (id, visitId) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id ? { ...f, visits: f.visits.filter((v) => v.id !== visitId) } : f
-      ),
-    })),
-  addCourseware: (id, cw) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id
-          ? { ...f, coursewares: [...f.coursewares, { ...cw, id: generateId(), linkedAt: now() }] }
-          : f
-      ),
-    })),
-  toggleCoursewareModify: (id, cwId) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id
-          ? {
-              ...f,
-              coursewares: f.coursewares.map((c) => (c.id === cwId ? { ...c, needModify: !c.needModify } : c)),
-            }
-          : f
-      ),
-    })),
-  removeCourseware: (id, cwId) =>
-    set((s) => ({
-      feedbacks: s.feedbacks.map((f) =>
-        f.id === id ? { ...f, coursewares: f.coursewares.filter((c) => c.id !== cwId) } : f
-      ),
-    })),
+      updateStatus: (id, status) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id ? { ...f, status, closedAt: status === "closed" ? now() : f.closedAt } : f
+          ),
+        })),
+      assignTo: (id, assignee) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id ? { ...f, assignee, assigneeAvatar: assignee.slice(0, 2).toUpperCase() } : f
+          ),
+        })),
+      setUrgency: (id, urgency) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, urgency } : f)),
+        })),
+      setCategory: (id, category) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, category } : f)),
+        })),
+      setPromisedAt: (id, date) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, promisedAt: date } : f)),
+        })),
+      setInternalNote: (id, note) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) => (f.id === id ? { ...f, internalNote: note } : f)),
+        })),
 
-  submitFeedback: (payload) => {
-    const newItem: Feedback = {
-      id: generateId(),
-      ticketNo: `FB-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(get().feedbacks.length + 1).padStart(4, "0")}`,
-      studentId: "s001",
-      studentName: "林思语",
-      studentAvatar: "LS",
-      courseId: payload.courseId ?? "",
-      courseName: payload.courseName ?? "",
-      className: payload.className,
-      teacherName: payload.teacherName,
-      chapterId: payload.chapterId,
-      chapterName: payload.chapterName,
-      lessonId: payload.lessonId,
-      lessonName: payload.lessonName,
-      type: payload.type ?? "other",
-      satisfaction: payload.satisfaction ?? 4,
-      content: payload.content ?? "",
-      screenshots: payload.screenshots ?? [],
-      recordings: payload.recordings ?? [],
-      source: "web",
-      urgency: "normal",
-      status: "pending",
-      createdAt: now(),
-      comments: [],
-      visits: [],
-      coursewares: [],
-    } as Feedback;
-    set((s) => ({ feedbacks: [newItem, ...s.feedbacks] }));
-    return newItem;
-  },
-}));
+      addComment: (id, comment) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id
+              ? { ...f, comments: [...f.comments, { ...comment, id: generateId(), createdAt: now() }] }
+              : f
+          ),
+        })),
+      addVisit: (id, visit) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id ? { ...f, visits: [...f.visits, { ...visit, id: generateId(), createdAt: now() }] } : f
+          ),
+        })),
+      removeVisit: (id, visitId) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id ? { ...f, visits: f.visits.filter((v) => v.id !== visitId) } : f
+          ),
+        })),
+      addCourseware: (id, cw) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id
+              ? { ...f, coursewares: [...f.coursewares, { ...cw, id: generateId(), linkedAt: now() }] }
+              : f
+          ),
+        })),
+      toggleCoursewareModify: (id, cwId) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id
+              ? {
+                  ...f,
+                  coursewares: f.coursewares.map((c) => (c.id === cwId ? { ...c, needModify: !c.needModify } : c)),
+                }
+              : f
+          ),
+        })),
+      removeCourseware: (id, cwId) =>
+        set((s) => ({
+          feedbacks: s.feedbacks.map((f) =>
+            f.id === id ? { ...f, coursewares: f.coursewares.filter((c) => c.id !== cwId) } : f
+          ),
+        })),
+
+      submitFeedback: (payload) => {
+        const newItem: Feedback = {
+          id: generateId(),
+          ticketNo: `FB-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(get().feedbacks.length + 1).padStart(4, "0")}`,
+          studentId: "s001",
+          studentName: "林思语",
+          studentAvatar: "LS",
+          courseId: payload.courseId ?? "",
+          courseName: payload.courseName ?? "",
+          className: payload.className,
+          teacherName: payload.teacherName,
+          chapterId: payload.chapterId,
+          chapterName: payload.chapterName,
+          lessonId: payload.lessonId,
+          lessonName: payload.lessonName,
+          type: payload.type ?? "other",
+          satisfaction: payload.satisfaction ?? 4,
+          content: payload.content ?? "",
+          screenshots: payload.screenshots ?? [],
+          recordings: payload.recordings ?? [],
+          source: "web",
+          urgency: "normal",
+          status: "pending",
+          createdAt: now(),
+          comments: [],
+          visits: [],
+          coursewares: [],
+        } as Feedback;
+        set((s) => ({ feedbacks: [newItem, ...s.feedbacks] }));
+        return newItem;
+      },
+    }),
+    {
+      name: "feedback-store",
+      partialize: (state) => ({
+        feedbacks: state.feedbacks,
+      }),
+    }
+  )
+);
