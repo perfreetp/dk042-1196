@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Feedback, Comment, VisitRecord, CoursewareLink, TicketStatus, UrgencyLevel } from "@/types";
+import type { Feedback, Comment, VisitRecord, CoursewareLink, TicketStatus, UrgencyLevel, FeedbackSource } from "@/types";
 import { feedbacks as mockFeedbacks } from "@/mock/feedbacks";
 import { students as mockStudents } from "@/mock/students";
 import { courses as mockCourses } from "@/mock/courses";
@@ -13,6 +13,7 @@ interface FilterState {
   keyword?: string;
   dateRange?: string;
   assignee?: string | "all";
+  source?: FeedbackSource | "all";
 }
 
 interface FeedbackState {
@@ -57,12 +58,12 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
   students: [...mockStudents],
   courses: [...mockCourses],
   analytics: analyticsData,
-  filters: { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all" },
+  filters: { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all" },
   selectedIds: [],
 
   setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
   resetFilters: () =>
-    set({ filters: { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all" } }),
+    set({ filters: { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all" } }),
   toggleSelected: (id) =>
     set((s) => ({
       selectedIds: s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id],

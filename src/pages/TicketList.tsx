@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Inbox, Clock, CheckCircle, AlertTriangle, Download, UserPlus,
   ChevronLeft, ChevronRight, Filter, MoreHorizontal, Eye,
-  UserCheck, XCircle, Smartphone, Monitor, MessageCircle, Phone, Star,
+  UserCheck, XCircle, Smartphone, Monitor, MessageCircle, Phone, Star, X,
 } from "lucide-react";
 import { useFeedbackStore } from "@/store/feedbackStore";
 import {
@@ -49,6 +49,14 @@ const statCards = [
   { key: "urgent", label: "紧急待办", icon: AlertTriangle, color: "bg-ember-50 text-ember-600", trend: "↓ 3% 较上周", up: false },
 ];
 
+const assigneeList = [
+  { name: "张客服", avatar: "ZK", role: "客服组" },
+  { name: "李教研", avatar: "LJ", role: "教研组" },
+  { name: "王客服", avatar: "WK", role: "客服组" },
+  { name: "赵客服", avatar: "ZK", role: "客服组" },
+  { name: "孙客服", avatar: "SK", role: "客服组" },
+];
+
 function isInDateRange(iso: string, range: string) {
   const d = new Date(iso), now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -59,8 +67,11 @@ function isInDateRange(iso: string, range: string) {
 }
 
 export default function TicketList() {
-  const { feedbacks, students, filters, setFilters, selectedIds, toggleSelected, clearSelected, selectAllVisible } = useFeedbackStore();
+  const { feedbacks, students, filters, setFilters, selectedIds, toggleSelected, clearSelected, selectAllVisible,
+    updateStatus, assignTo, setUrgency } = useFeedbackStore();
   const [currentPage, setCurrentPage] = useState(1);
+  const [assignModal, setAssignModal] = useState<"batch" | "single" | null>(null);
+  const [assignTarget, setAssignTarget] = useState<string | null>(null);
   const pageSize = 8;
 
   const stats = useMemo(() => ({
@@ -74,6 +85,7 @@ export default function TicketList() {
     if (filters.status !== "all" && f.status !== filters.status) return false;
     if (filters.urgency !== "all" && f.urgency !== filters.urgency) return false;
     if (filters.type !== "all" && f.type !== filters.type) return false;
+    if (filters.source !== "all" && filters.source && f.source !== filters.source) return false;
     if (filters.keyword?.trim()) {
       const kw = filters.keyword.trim().toLowerCase();
       if (!f.ticketNo.toLowerCase().includes(kw) && !f.studentName.toLowerCase().includes(kw) && !f.courseName.toLowerCase().includes(kw)) return false;
@@ -126,6 +138,40 @@ export default function TicketList() {
     );
   };
 
+  const handleBatchAssign = (name: string, avatar: string) => {
+    selectedIds.forEach((id) => assignTo(id, name));
+    clearSelected();
+    setAssignModal(null);
+  };
+
+  const handleSingleAssign = (name: string) => {
+    if (assignTarget) assignTo(assignTarget, name);
+    setAssignModal(null);
+    setAssignTarget(null);
+  };
+
+  const handleBatchUrgent = () => {
+    selectedIds.forEach((id) => setUrgency(id, "urgent"));
+    clearSelected();
+  };
+
+  const handleExport = () => {
+    const data = filtered.map((f) => ({
+      工单编号: f.ticketNo, 学员: f.studentName, 课程: f.courseName,
+      类型: feedbackTypeMap[f.type].label, 满意度: f.satisfaction,
+      紧急度: urgencyMap[f.urgency].label, 状态: statusMap[f.status].label,
+      处理人: f.assignee || "-", 来源: sourceMap[f.source].label,
+      创建时间: formatDate(f.createdAt),
+    }));
+    const headers = Object.keys(data[0] || {});
+    const csv = [headers.join(","), ...data.map((r) => headers.map((h) => `"${(r as any)[h]}"`).join(","))].join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `feedback_export_${Date.now()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-5">
       <div>
@@ -159,7 +205,7 @@ export default function TicketList() {
           </div>
           {statusOptions.map((o) => (
             <Chip key={o.value} active={filters.status === o.value}
-              onClick={() => setFilters({ status: o.value })}
+              onClick={() => { setFilters({ status: o.value }); setCurrentPage(1); }}
               ac={o.value === "closed" && filters.status === o.value ? "bg-ink-600 text-white border-ink-600" : undefined}>
               {o.label}
             </Chip>
@@ -170,7 +216,7 @@ export default function TicketList() {
           <span className="text-xs font-medium text-ink-500 w-10 shrink-0">紧急度</span>
           {urgencyOptions.map((o) => (
             <Chip key={o.value} active={filters.urgency === o.value}
-              onClick={() => setFilters({ urgency: o.value })}
+              onClick={() => { setFilters({ urgency: o.value }); setCurrentPage(1); }}
               ac={o.value === "urgent" && filters.urgency === o.value ? "bg-ember-500 text-white border-ember-500" : undefined}>
               <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", urgencyMap[o.value === "all" ? "normal" : (o.value as UrgencyLevel)].dot)} />
               {o.label}
@@ -181,7 +227,7 @@ export default function TicketList() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-medium text-ink-500 w-10 shrink-0">类型</span>
           {feedbackTypeOptions.map((o) => (
-            <Chip key={o.value} active={filters.type === o.value} onClick={() => setFilters({ type: o.value })}>
+            <Chip key={o.value} active={filters.type === o.value} onClick={() => { setFilters({ type: o.value }); setCurrentPage(1); }}>
               {o.emoji} {o.label}
             </Chip>
           ))}
@@ -190,20 +236,16 @@ export default function TicketList() {
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-medium text-ink-500 w-10 shrink-0">来源</span>
-            {sourceOptions.map((o) => {
-              const cur = (filters as any).source;
-              const active = cur === o.value || (o.value === "all" && !cur);
-              return (
-                <Chip key={o.value} active={active}
-                  onClick={() => setFilters({ ...filters, ...(o.value === "all" ? { source: undefined } : { source: o.value as FeedbackSource }) })}>
-                  {o.label}
-                </Chip>
-              );
-            })}
+            {sourceOptions.map((o) => (
+              <Chip key={o.value} active={filters.source === o.value || (!filters.source && o.value === "all")}
+                onClick={() => { setFilters({ source: o.value }); setCurrentPage(1); }}>
+                {o.label}
+              </Chip>
+            ))}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             {dateRangeOptions.map((o) => (
-              <Chip key={o.value} active={filters.dateRange === o.value} onClick={() => setFilters({ dateRange: o.value })}>
+              <Chip key={o.value} active={filters.dateRange === o.value} onClick={() => { setFilters({ dateRange: o.value }); setCurrentPage(1); }}>
                 {o.label}
               </Chip>
             ))}
@@ -212,7 +254,7 @@ export default function TicketList() {
             <div className="relative">
               <input type="text" placeholder="搜索工单号、学员、课程..."
                 value={filters.keyword || ""}
-                onChange={(e) => setFilters({ keyword: e.target.value })}
+                onChange={(e) => { setFilters({ keyword: e.target.value }); setCurrentPage(1); }}
                 className="field-input w-64 pl-9" />
               <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -232,13 +274,14 @@ export default function TicketList() {
         </label>
         <div className="h-5 w-px bg-ink-200 mx-1" />
         <button type="button" disabled={selectedIds.length === 0}
-          className="btn-soft !px-3 !py-1.5 !text-xs" onClick={clearSelected}>
+          className="btn-soft !px-3 !py-1.5 !text-xs" onClick={() => setAssignModal("batch")}>
           <UserPlus className="w-3.5 h-3.5" />批量指派
         </button>
-        <button type="button" disabled={selectedIds.length === 0} className="btn-soft !px-3 !py-1.5 !text-xs">
+        <button type="button" disabled={selectedIds.length === 0}
+          className="btn-soft !px-3 !py-1.5 !text-xs" onClick={handleBatchUrgent}>
           <AlertTriangle className="w-3.5 h-3.5" />批量紧急
         </button>
-        <button type="button" className="btn-soft !px-3 !py-1.5 !text-xs">
+        <button type="button" className="btn-soft !px-3 !py-1.5 !text-xs" onClick={handleExport}>
           <Download className="w-3.5 h-3.5" />导出
         </button>
         <div className="ml-auto text-xs text-ink-500">
@@ -322,8 +365,15 @@ export default function TicketList() {
                       <td className="py-3 px-4">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Link to={`/tickets/${fb.id}`} className="btn-soft !p-1.5" title="查看"><Eye className="w-3.5 h-3.5" /></Link>
-                          <button type="button" className="btn-soft !p-1.5" title="指派"><UserCheck className="w-3.5 h-3.5" /></button>
-                          <button type="button" className="btn-soft !p-1.5" title="关闭"><XCircle className="w-3.5 h-3.5" /></button>
+                          <button type="button" className="btn-soft !p-1.5" title="指派"
+                            onClick={() => { setAssignTarget(fb.id); setAssignModal("single"); }}>
+                            <UserCheck className="w-3.5 h-3.5" />
+                          </button>
+                          <button type="button" className="btn-soft !p-1.5" title="关闭"
+                            onClick={() => updateStatus(fb.id, "closed")}
+                            disabled={fb.status === "closed"}>
+                            <XCircle className="w-3.5 h-3.5" />
+                          </button>
                           <button type="button" className="btn-soft !p-1.5" title="更多"><MoreHorizontal className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
@@ -360,6 +410,37 @@ export default function TicketList() {
           </div>
         </div>
       </div>
+
+      {assignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-800/40 backdrop-blur-sm animate-popIn" onClick={() => { setAssignModal(null); setAssignTarget(null); }}>
+          <div className="card p-6 w-[380px] shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-lg font-bold text-ink-800">
+                {assignModal === "batch" ? `批量指派（${selectedIds.length} 条）` : "指派处理人"}
+              </h3>
+              <button type="button" onClick={() => { setAssignModal(null); setAssignTarget(null); }} className="w-8 h-8 rounded-lg hover:bg-cream-100 flex items-center justify-center text-ink-400 hover:text-ink-600 transition">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {assigneeList.map((a) => (
+                <button key={a.name} type="button"
+                  onClick={() => assignModal === "batch" ? handleBatchAssign(a.name, a.avatar) : handleSingleAssign(a.name)}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-cream-200 hover:border-moss-300 hover:bg-moss-50/50 transition-all group">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-sky2-100 to-moss-100 text-moss-700 text-sm font-semibold flex items-center justify-center">
+                    {a.avatar}
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className="text-sm font-medium text-ink-800">{a.name}</p>
+                    <p className="text-xs text-ink-400">{a.role}</p>
+                  </div>
+                  <UserCheck className="w-4 h-4 text-ink-300 group-hover:text-moss-600 transition" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

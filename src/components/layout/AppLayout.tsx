@@ -1,4 +1,5 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquarePlus,
   Inbox,
@@ -20,10 +21,29 @@ const navItems = [
 export default function AppLayout() {
   const { feedbacks } = useFeedbackStore();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchText, setSearchText] = useState("");
   const pendingCount = feedbacks.filter((f) => f.status === "pending").length;
 
   const pageTitle =
     navItems.find((n) => location.pathname.startsWith(n.to))?.label ?? "反馈管理";
+
+  const handleSearch = () => {
+    const kw = searchText.trim();
+    if (!kw) return;
+    const match = feedbacks.find(
+      (f) =>
+        f.ticketNo.toLowerCase().includes(kw.toLowerCase()) ||
+        f.studentName.includes(kw)
+    );
+    if (match) {
+      navigate(`/tickets/${match.id}`);
+    } else {
+      navigate("/tickets");
+      useFeedbackStore.getState().setFilters({ keyword: kw });
+    }
+    setSearchText("");
+  };
 
   return (
     <div className="min-h-screen flex">
@@ -115,6 +135,9 @@ export default function AppLayout() {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
               <input
                 placeholder="搜索工单编号、学员姓名、课程名…"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/80 border border-ink-100 text-sm text-ink-700 placeholder:text-ink-300 focus:outline-none focus:ring-4 focus:ring-moss-500/10 focus:border-moss-300 transition"
               />
             </div>
