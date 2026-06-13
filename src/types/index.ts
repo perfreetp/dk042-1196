@@ -153,3 +153,38 @@ export interface AnalyticsOverview {
   topTeachers: Array<{ name: string; count: number; avgSat: number }>;
   keywords: Array<{ word: string; weight: number }>;
 }
+
+export interface SavedView {
+  id: string;
+  name: string;
+  scope: "list" | "analytics" | "both";
+  owner: "service" | "teaching" | "all";
+  filters: {
+    status?: string;
+    urgency?: string;
+    type?: string;
+    keyword?: string;
+    dateRange?: string;
+    assignee?: string;
+    source?: string;
+    sla?: string;
+    course?: string;
+    teacher?: string;
+    className?: string;
+  };
+  createdAt: string;
+}
+
+export interface VisitTemplate {
+  id: string;
+  name: string;
+  channel: "phone" | "wechat" | "in_app";
+  summary: string;
+  result: "connected" | "no_answer" | "scheduled";
+}
+
+export interface NoteTemplate {
+  id: string;
+  name: string;
+  content: string;
+}

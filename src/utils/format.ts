@@ -81,7 +81,7 @@ export const isSameDay = (a: Date, b: Date) =>
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
 
-export type SlaStatus = "overdue" | "due_today" | "due_soon" | "none";
+export type SlaStatus = "overdue" | "due_today" | "due_48h" | "due_soon" | "none";
 
 export const getSlaStatus = (promisedAt?: string, status?: string): SlaStatus => {
   if (!promisedAt || status === "closed") return "none";
@@ -90,10 +90,11 @@ export const getSlaStatus = (promisedAt?: string, status?: string): SlaStatus =>
   const now = new Date();
   due.setHours(23, 59, 59, 999);
   const diffMs = due.getTime() - now.getTime();
-  const diffDays = diffMs / 86400000;
-  if (diffDays < 0) return "overdue";
+  const diffHours = diffMs / 3600000;
+  if (diffHours < 0) return "overdue";
   if (isSameDay(due, now)) return "due_today";
-  if (diffDays <= 2) return "due_soon";
+  if (diffHours <= 48) return "due_48h";
+  if (diffHours <= 72) return "due_soon";
   return "none";
 };
 
@@ -101,7 +102,8 @@ export const getSlaLabel = (s: SlaStatus) => {
   switch (s) {
     case "overdue": return { label: "已超时", color: "chip bg-ember-500 text-white shadow-ember" };
     case "due_today": return { label: "今天到期", color: "chip bg-ember-100 text-ember-700 border border-ember-200" };
-    case "due_soon": return { label: "即将到期", color: "chip bg-amber-50 text-amber-700 border border-amber-200" };
+    case "due_48h": return { label: "48H内", color: "chip bg-amber-50 text-amber-700 border border-amber-200" };
+    case "due_soon": return { label: "即将到期", color: "chip bg-sky2-50 text-sky2-700 border border-sky2-200" };
     default: return { label: "", color: "" };
   }
 };
