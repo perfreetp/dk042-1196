@@ -7,10 +7,11 @@ import {
 import {
   TrendingUp, TrendingDown, Minus, Clock, Star, Inbox, CheckCircle,
   Gauge, MessageSquare, Users, BookOpen, X, ChevronRight, Filter,
+  AlertTriangle, Phone, UserCheck, Send,
 } from "lucide-react";
 import { useFeedbackStore } from "@/store/feedbackStore";
-import { cn, feedbackTypeMap, statusMap, urgencyMap, formatDate } from "@/utils/format";
-import type { Feedback, FeedbackType, Satisfaction } from "@/types";
+import { cn, feedbackTypeMap, statusMap, urgencyMap, formatDate, getSlaStatus, getSlaLabel, isSameDay } from "@/utils/format";
+import type { Feedback, FeedbackType, Satisfaction, TicketStatus, VisitRecord } from "@/types";
 
 const courseOptions = ["全部", "高中数学·函数与导数强化班", "高中英语·阅读与写作提升营", "大学计算机·Python 数据分析实战", "初三物理·力学冲刺课程", "高考语文·作文提分"];
 const teacherOptions = ["全部", "陈明远", "李思雨", "王浩然", "赵文博", "周老师"];
@@ -22,6 +23,20 @@ const timeRangeOptions = [
 ];
 
 const typeKeyToLabel: Record<string, string> = { course_content: "课程内容", homework: "作业批改", teacher_service: "老师服务", platform: "平台体验", other: "其他建议" };
+
+const assigneeList = [
+  { name: "张客服", avatar: "ZK", role: "客服组" },
+  { name: "李教研", avatar: "LJ", role: "教研组" },
+  { name: "王客服", avatar: "WK", role: "客服组" },
+  { name: "赵客服", avatar: "ZK", role: "客服组" },
+  { name: "孙客服", avatar: "SK", role: "客服组" },
+];
+
+const visitChannelOptions: Array<{ value: VisitRecord["channel"]; label: string; icon: any }> = [
+  { value: "phone", label: "电话", icon: Phone },
+  { value: "wechat", label: "微信", icon: MessageSquare },
+  { value: "in_app", label: "站内信", icon: Send },
+];
 
 const PIE_COLORS = ["#2F806B", "#F56E17", "#55B2FF", "#5A6B6E", "#F59E0B"];
 
@@ -99,99 +114,117 @@ const CHeader = ({ title, desc, icon: Icon }: { title: string; desc?: string; ic
 );
 
 function buildTrends(list: Feedback[], timeRange: string) {
-  const now = Date.now();
-  const msDay = 86400000;
-  let cutoff = 0;
-  if (timeRange === "7d") cutoff = now - 7 * msDay;
-  else if (timeRange === "30d") cutoff = now - 30 * msDay;
+  if (list.length === 0) return [];
 
-  const ranged = list.filter((f) => new Date(f.createdAt).getTime() >= cutoff);
-  if (ranged.length === 0) return [];
+  const dates = list.map((f) => new Date(f.createdAt).getTime()).sort((a, b) => a - b);
+  const minDate = dates[0];
+  const maxDate = dates[dates.length - 1];
+  const msDay = 86400000;
+
+  let startTs: number, endTs: number, bucketMs: number, dateFormat: (ts: number) => string;
 
   if (timeRange === "7d") {
-    const buckets: Record<string, { count: number; sat: number }> = {};
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now - i * msDay);
-      const key = `${d.getMonth() + 1}/${d.getDate()}`;
-      buckets[key] = { count: 0, sat: 0 };
+    endTs = maxDate;
+    startTs = maxDate - 6 * msDay;
+    bucketMs = msDay;
+    dateFormat = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  } else if (timeRange === "30d") {
+    endTs = maxDate;
+    startTs = maxDate - 29 * msDay;
+    bucketMs = 5 * msDay;
+    dateFormat = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  } else {
+    startTs = minDate;
+    endTs = maxDate;
+    const totalDays = Math.max(1, Math.ceil((endTs - startTs) / msDay) + 1);
+    if (totalDays <= 14) {
+      bucketMs = msDay;
+      dateFormat = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}`; };
+    } else if (totalDays <= 60) {
+      bucketMs = 5 * msDay;
+      dateFormat = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}`; };
+    } else {
+      bucketMs = 7 * msDay;
+      dateFormat = (ts) => {
+        const d = new Date(ts);
+        const wk = Math.ceil(((d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / msDay + new Date(d.getFullYear(), 0, 1).getDay() + 1) / 7);
+        return `${d.getFullYear().toString().slice(2)}-W${wk}`;
+      };
     }
-    ranged.forEach((f) => {
-      const d = new Date(f.createdAt);
-      const key = `${d.getMonth() + 1}/${d.getDate()}`;
-      if (buckets[key]) { buckets[key].count++; buckets[key].sat += f.satisfaction; }
-    });
-    return Object.entries(buckets).map(([date, v]) => ({
-      date, count: v.count, satisfaction: v.count > 0 ? Math.round((v.sat / v.count) * 10) / 10 : 0,
-    }));
   }
 
-  if (timeRange === "30d") {
-    const buckets: Record<string, { count: number; sat: number }> = {};
-    for (let i = 29; i >= 0; i -= 5) {
-      const dStart = new Date(now - i * msDay);
-      const dEnd = new Date(now - Math.max(i - 4, 0) * msDay);
-      const key = `${dStart.getMonth() + 1}/${dStart.getDate()}-${dEnd.getMonth() + 1}/${dEnd.getDate()}`;
-      buckets[key] = { count: 0, sat: 0 };
-    }
-    ranged.forEach((f) => {
-      const ft = new Date(f.createdAt).getTime();
-      for (const [, v] of Object.entries(buckets)) { v.count; v.sat; }
-      const dayIdx = Math.floor((now - ft) / msDay);
-      const bucketIdx = Math.min(Math.floor(dayIdx / 5), 5);
-      const keys = Object.keys(buckets);
-      if (keys[bucketIdx]) {
-        const b = buckets[keys[bucketIdx]];
-        b.count++; b.sat += f.satisfaction;
-      }
-    });
-    return Object.entries(buckets).map(([date, v]) => ({
-      date, count: v.count, satisfaction: v.count > 0 ? Math.round((v.sat / v.count) * 10) / 10 : 0,
-    }));
+  const buckets: Array<{ key: string; ts: number; count: number; sat: number }> = [];
+  let cur = startTs;
+  while (cur <= endTs) {
+    buckets.push({ key: dateFormat(cur), ts: cur, count: 0, sat: 0 });
+    cur += bucketMs;
   }
+  if (buckets.length === 0) return [];
 
-  const buckets: Record<string, { count: number; sat: number }> = {};
-  ranged.forEach((f) => {
-    const d = new Date(f.createdAt);
-    const wk = getWeekKey(d);
-    if (!buckets[wk]) buckets[wk] = { count: 0, sat: 0 };
-    buckets[wk].count++; buckets[wk].sat += f.satisfaction;
+  list.forEach((f) => {
+    const ft = new Date(f.createdAt).getTime();
+    let idx = Math.floor((ft - startTs) / bucketMs);
+    idx = Math.max(0, Math.min(idx, buckets.length - 1));
+    buckets[idx].count++;
+    buckets[idx].sat += f.satisfaction;
   });
-  return Object.entries(buckets).sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({
-    date, count: v.count, satisfaction: v.count > 0 ? Math.round((v.sat / v.count) * 10) / 10 : 0,
-  }));
-}
 
-function getWeekKey(d: Date) {
-  const jan1 = new Date(d.getFullYear(), 0, 1);
-  const wk = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-  return `W${wk}`;
+  return buckets.map((b) => ({
+    date: b.key,
+    count: b.count,
+    satisfaction: b.count > 0 ? Math.round((b.sat / b.count) * 10) / 10 : 0,
+  }));
 }
 
 type DrillFilter = { kind: "type" | "satisfaction"; value: string | number } | null;
 
 export default function Analytics() {
-  const { feedbacks, analytics } = useFeedbackStore();
+  const { feedbacks, analytics, updateStatus, assignTo, addVisit } = useFeedbackStore();
   const [course, setCourse] = useState("全部");
   const [teacher, setTeacher] = useState("全部");
   const [cls, setCls] = useState("全部");
   const [type, setType] = useState("全部");
   const [keywordTab, setKeywordTab] = useState("全部");
   const [timeRange, setTimeRange] = useState("7d");
+  const [slaFilter, setSlaFilter] = useState<"all" | "overdue" | "due_today" | "visit_today">("all");
   const [drill, setDrill] = useState<DrillFilter>(null);
+  const [quickAssign, setQuickAssign] = useState<string | null>(null);
+  const [visitModal, setVisitModal] = useState<string | null>(null);
+  const [visitForm, setVisitForm] = useState<{ channel: VisitRecord["channel"]; summary: string; result: VisitRecord["result"] }>({
+    channel: "phone", summary: "", result: "connected",
+  });
 
   const filtered = useMemo(() => feedbacks.filter((f) => {
     if (course !== "全部" && f.courseName !== course) return false;
     if (teacher !== "全部" && f.teacherName !== teacher) return false;
     if (cls !== "全部" && f.className !== cls) return false;
     if (type !== "全部" && typeKeyToLabel[f.type] !== type) return false;
+    if (slaFilter !== "all") {
+      const s = getSlaStatus(f.promisedAt, f.status);
+      if (slaFilter === "overdue" && s !== "overdue") return false;
+      if (slaFilter === "due_today" && s !== "due_today" && s !== "overdue") return false;
+      if (slaFilter === "visit_today") {
+        const hasToday = (f.visits || []).some((v) => isSameDay(new Date(v.createdAt), new Date()));
+        if (!hasToday) return false;
+      }
+    }
     return true;
-  }), [feedbacks, course, teacher, cls, type]);
+  }), [feedbacks, course, teacher, cls, type, slaFilter]);
 
   const computed = useMemo(() => {
     const total = filtered.length;
     const processing = filtered.filter((f) => f.status !== "closed").length;
     const closed = filtered.filter((f) => f.status === "closed").length;
     const avgSat = total > 0 ? Math.round((filtered.reduce((s, f) => s + f.satisfaction, 0) / total) * 10) / 10 : 0;
+
+    let overdue = 0, dueToday = 0, dueSoon = 0, visitToday = 0;
+    filtered.forEach((f) => {
+      const s = getSlaStatus(f.promisedAt, f.status);
+      if (s === "overdue") overdue++;
+      else if (s === "due_today") dueToday++;
+      else if (s === "due_soon") dueSoon++;
+      if ((f.visits || []).some((v) => isSameDay(new Date(v.createdAt), new Date()))) visitToday++;
+    });
 
     const byTypeMap: Record<string, number> = {};
     filtered.forEach((f) => { const lbl = typeKeyToLabel[f.type] || "其他"; byTypeMap[lbl] = (byTypeMap[lbl] || 0) + 1; });
@@ -217,7 +250,7 @@ export default function Analytics() {
 
     const trends = buildTrends(filtered, timeRange);
 
-    return { total, processing, closed, avgSat, byType, bySatisfaction, handleDuration, topCourses, trends };
+    return { total, processing, closed, avgSat, byType, bySatisfaction, handleDuration, topCourses, trends, overdue, dueToday, dueSoon, visitToday };
   }, [filtered, timeRange]);
 
   const closeRate = computed.total > 0 ? Math.round((computed.closed / computed.total) * 100) : 0;
@@ -262,6 +295,53 @@ export default function Analytics() {
         <OCard label="已关闭" value={computed.closed} icon={CheckCircle} iconBg="bg-cream-200" iconColor="text-ink-700" subValue={<span className="chip bg-moss-100 text-moss-700 mb-1">关闭率 {closeRate}%</span>} />
         <OCard label="平均处理时长" value={`${analytics.avgHandleHours}h`} icon={Clock} iconBg="bg-cream-200" iconColor="text-ink-700" chip={<TrendChip up="down" value="-2.3h 周同比" good />} />
         <OCard label="平均满意度" value={computed.avgSat} icon={Star} iconBg="bg-ember-50" iconColor="text-ember-500" subValue={<div className="mb-1"><Stars rating={computed.avgSat} /></div>} />
+      </div>
+
+      <div className="card p-5">
+        <CHeader title="SLA 跟进" desc="一键筛选超时、到期、回访工单，把握处理节奏" icon={AlertTriangle} />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { key: "overdue", label: "已超时", value: computed.overdue, color: "bg-ember-50 text-ember-600", bar: "bg-ember-500", icon: AlertTriangle },
+            { key: "due_today", label: "今日到期", value: computed.dueToday, color: "bg-amber-50 text-amber-600", bar: "bg-amber-500", icon: Clock },
+            { key: "due_soon", label: "即将到期", value: computed.dueSoon, color: "bg-sky2-50 text-sky2-600", bar: "bg-sky2-500", icon: Clock },
+            { key: "visit_today", label: "今日回访", value: computed.visitToday, color: "bg-moss-50 text-moss-600", bar: "bg-moss-500", icon: Phone },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = slaFilter === item.key;
+            const total = computed.total || 1;
+            return (
+              <button key={item.key} type="button" onClick={() => setSlaFilter(active ? "all" : item.key as any)}
+                className={cn(
+                  "p-4 rounded-2xl text-left transition-all duration-200 border",
+                  active
+                    ? "bg-white border-moss-400 shadow-card ring-2 ring-moss-500/20"
+                    : "bg-cream-50/50 border-transparent hover:bg-white hover:border-cream-200 hover:shadow-soft"
+                )}>
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", item.color)}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <span className="text-xs font-medium text-ink-500">{item.label}</span>
+                </div>
+                <p className="text-2xl font-display font-bold text-ink-800">{item.value}</p>
+                <div className="mt-2 h-1.5 rounded-full bg-cream-200 overflow-hidden">
+                  <div className={cn("h-full rounded-full transition-all", item.bar)} style={{ width: `${Math.min(100, (item.value / total) * 100)}%` }} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {slaFilter !== "all" && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-ink-500">当前筛选：</span>
+            <span className="chip bg-moss-100 text-moss-700">
+              {slaFilter === "overdue" ? "已超时" : slaFilter === "due_today" ? "今日到期" : "今日回访"}
+            </span>
+            <button type="button" onClick={() => setSlaFilter("all")} className="text-xs text-moss-600 hover:text-moss-700 font-medium">
+              清除筛选
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card p-5">
@@ -396,7 +476,7 @@ export default function Analytics() {
                 <h3 className="font-display text-base font-bold text-ink-800">
                   {drill.kind === "type" ? `类型：${drill.value}` : `满意度：${drill.value} 星`}
                 </h3>
-                <p className="text-xs text-ink-400 mt-0.5">共 {drillFeedbacks.length} 条工单 · 点击图表同一区域可取消筛选</p>
+                <p className="text-xs text-ink-400 mt-0.5">共 {drillFeedbacks.length} 条工单 · 点击图表同一区域可取消筛选 · 支持快速处理</p>
               </div>
             </div>
             <button type="button" onClick={() => setDrill(null)}
@@ -414,34 +494,73 @@ export default function Analytics() {
                     <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">工单号</th>
                     <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">学员</th>
                     <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">课程</th>
-                    <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">类型</th>
                     <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">满意度</th>
+                    <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">SLA</th>
                     <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">状态</th>
-                    <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">创建时间</th>
-                    <th className="py-2.5 px-3 text-right text-xs font-medium text-ink-500 uppercase tracking-wider"></th>
+                    <th className="py-2.5 px-3 text-left text-xs font-medium text-ink-500 uppercase tracking-wider">处理人</th>
+                    <th className="py-2.5 px-3 text-right text-xs font-medium text-ink-500 uppercase tracking-wider">快速操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {drillFeedbacks.map((fb) => {
-                    const ti = feedbackTypeMap[fb.type], si = statusMap[fb.status];
+                    const si = statusMap[fb.status];
+                    const sla = getSlaStatus(fb.promisedAt, fb.status);
+                    const slaLabel = getSlaLabel(sla);
                     return (
                       <tr key={fb.id} className="border-b border-cream-200/60 hover:bg-moss-50/40 transition-colors">
-                        <td className="py-2.5 px-3 font-mono text-xs font-semibold text-moss-700">{fb.ticketNo}</td>
+                        <td className="py-2.5 px-3">
+                          <Link to={`/tickets/${fb.id}`} className="font-mono text-xs font-semibold text-moss-700 hover:underline">
+                            {fb.ticketNo}
+                          </Link>
+                        </td>
                         <td className="py-2.5 px-3">
                           <div className="flex items-center gap-2">
                             <div className="w-6 h-6 rounded-full bg-cream-200 text-ink-700 text-[10px] font-semibold flex items-center justify-center">{fb.studentAvatar}</div>
                             <span className="text-sm text-ink-700">{fb.studentName}</span>
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 text-sm text-ink-600 max-w-[160px] truncate">{fb.courseName}</td>
-                        <td className="py-2.5 px-3"><span className={cn("chip", ti.color, "border")}>{ti.emoji} {ti.label}</span></td>
+                        <td className="py-2.5 px-3 text-sm text-ink-600 max-w-[140px] truncate">{fb.courseName}</td>
                         <td className="py-2.5 px-3"><Stars rating={fb.satisfaction} size={12} /></td>
-                        <td className="py-2.5 px-3"><span className={si.color}>{si.label}</span></td>
-                        <td className="py-2.5 px-3 text-xs text-ink-500">{formatDate(fb.createdAt)}</td>
-                        <td className="py-2.5 px-3 text-right">
-                          <Link to={`/tickets/${fb.id}`} className="btn-soft !p-1.5 inline-flex items-center" title="查看详情">
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </Link>
+                        <td className="py-2.5 px-3">
+                          {slaLabel.label ? <span className={slaLabel.color}>{slaLabel.label}</span> : <span className="text-xs text-ink-300">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <select
+                            value={fb.status}
+                            onChange={(e) => updateStatus(fb.id, e.target.value as TicketStatus)}
+                            className="text-xs border border-ink-200 rounded-lg px-2 py-1 bg-white text-ink-700 focus:outline-none focus:border-moss-400 focus:ring-2 focus:ring-moss-100 cursor-pointer"
+                          >
+                            {Object.entries(statusMap).map(([key, val]) => (
+                              <option key={key} value={key}>{val.label}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <select
+                            value={fb.assignee || ""}
+                            onChange={(e) => assignTo(fb.id, e.target.value)}
+                            className="text-xs border border-ink-200 rounded-lg px-2 py-1 bg-white text-ink-700 focus:outline-none focus:border-moss-400 focus:ring-2 focus:ring-moss-100 cursor-pointer max-w-[110px]"
+                          >
+                            <option value="">未分配</option>
+                            {assigneeList.map((a) => (
+                              <option key={a.name} value={a.name}>{a.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => { setVisitModal(fb.id); setVisitForm({ channel: "phone", summary: "", result: "connected" }); }}
+                              className="btn-soft !p-1.5 !text-xs"
+                              title="补回访记录"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </button>
+                            <Link to={`/tickets/${fb.id}`} className="btn-soft !p-1.5" title="查看详情">
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -450,6 +569,89 @@ export default function Analytics() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {visitModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={() => setVisitModal(null)}>
+          <div className="card p-6 w-full max-w-md animate-popIn" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display text-lg font-bold text-ink-800">补回访记录</h3>
+              <button type="button" onClick={() => setVisitModal(null)}
+                className="w-8 h-8 rounded-lg hover:bg-cream-100 flex items-center justify-center text-ink-400 hover:text-ink-600 transition">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-ink-500 mb-2">回访方式</label>
+                <div className="flex gap-2">
+                  {visitChannelOptions.map((opt) => {
+                    const Icon = opt.icon;
+                    return (
+                      <button key={opt.value} type="button" onClick={() => setVisitForm((f) => ({ ...f, channel: opt.value }))}
+                        className={cn(
+                          "flex-1 flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all",
+                          visitForm.channel === opt.value
+                            ? "bg-moss-50 border-moss-300 text-moss-700"
+                            : "bg-white border-ink-200 text-ink-500 hover:border-moss-200"
+                        )}>
+                        <Icon className="w-4 h-4" />
+                        <span className="text-xs font-medium">{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-500 mb-2">回访结果</label>
+                <select
+                  value={visitForm.result}
+                  onChange={(e) => setVisitForm((f) => ({ ...f, result: e.target.value as VisitRecord["result"] }))}
+                  className="field-input w-full"
+                >
+                  <option value="connected">已接通</option>
+                  <option value="no_answer">未接听</option>
+                  <option value="scheduled">已约定回访</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-500 mb-2">回访内容</label>
+                <textarea
+                  value={visitForm.summary}
+                  onChange={(e) => setVisitForm((f) => ({ ...f, summary: e.target.value }))}
+                  rows={4}
+                  placeholder="请输入回访沟通内容..."
+                  className="field-input w-full resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button type="button" onClick={() => setVisitModal(null)}
+                className="btn-soft !px-4 !py-2 !text-sm">
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (visitModal && visitForm.summary.trim()) {
+                    addVisit(visitModal, {
+                      channel: visitForm.channel,
+                      summary: visitForm.summary,
+                      result: visitForm.result,
+                      operator: "当前客服",
+                      operatorAvatar: "DQ",
+                    });
+                    setVisitModal(null);
+                  }
+                }}
+                disabled={!visitForm.summary.trim()}
+                className="btn-primary !px-4 !py-2 !text-sm"
+              >
+                保存回访
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

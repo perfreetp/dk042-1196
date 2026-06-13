@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   BookOpen, Clock, UserCheck, Calendar, Plus, Trash2, Send, ChevronDown,
@@ -84,6 +84,18 @@ export default function TicketDetail() {
   });
   const [playingRec, setPlayingRec] = useState<number | null>(null);
   const [enlargedImg, setEnlargedImg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCategoryDraft(fb?.category ?? "");
+    setPromisedDraft(fb?.promisedAt ?? "");
+    setNoteDraft(fb?.internalNote ?? "");
+    setCwSearch("");
+    setCwSearchOpen(false);
+    setCommentDraft("");
+    setStatusOpen(false);
+    setAssigneeOpen(false);
+    setNewVisit({ channel: "phone", summary: "", result: "connected" });
+  }, [fb?.id]);
 
   if (!fb) {
     return (

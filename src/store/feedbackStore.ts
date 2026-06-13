@@ -14,6 +14,7 @@ interface FilterState {
   dateRange?: string;
   assignee?: string | "all";
   source?: FeedbackSource | "all";
+  sla?: "all" | "overdue" | "due_today" | "visit_today";
 }
 
 interface FeedbackState {
@@ -53,7 +54,7 @@ interface FeedbackState {
 const generateId = () => Math.random().toString(36).slice(2, 10);
 const now = () => new Date().toISOString();
 
-const defaultFilters: FilterState = { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all" };
+const defaultFilters: FilterState = { status: "all", urgency: "all", type: "all", keyword: "", dateRange: "all", assignee: "all", source: "all", sla: "all" };
 
 export const useFeedbackStore = create<FeedbackState>()(
   persist(

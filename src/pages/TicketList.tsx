@@ -8,7 +8,7 @@ import {
 import { useFeedbackStore } from "@/store/feedbackStore";
 import {
   urgencyMap, statusMap, feedbackTypeMap, sourceMap,
-  formatDate, satisfactionColor, vipMap, cn,
+  formatDate, satisfactionColor, vipMap, cn, getSlaStatus, getSlaLabel, isSameDay,
 } from "@/utils/format";
 import type { TicketStatus, UrgencyLevel, FeedbackType, Feedback, FeedbackSource, Satisfaction } from "@/types";
 
@@ -45,8 +45,8 @@ const sourceIconMap: Record<FeedbackSource, typeof Smartphone> = {
 const statCards = [
   { key: "total", label: "总反馈", icon: Inbox, color: "bg-moss-50 text-moss-600", trend: "↑ 12% 较上周", up: true },
   { key: "processing", label: "处理中", icon: Clock, color: "bg-sky2-50 text-sky2-600", trend: "↑ 8% 较上周", up: true },
-  { key: "closed", label: "已关闭", icon: CheckCircle, color: "bg-cream-200 text-ink-600", trend: "↑ 15% 较上周", up: true },
-  { key: "urgent", label: "紧急待办", icon: AlertTriangle, color: "bg-ember-50 text-ember-600", trend: "↓ 3% 较上周", up: false },
+  { key: "overdue", label: "已超时", icon: AlertTriangle, color: "bg-ember-50 text-ember-600", trend: "需关注", up: false },
+  { key: "dueToday", label: "今日到期", icon: Clock, color: "bg-amber-50 text-amber-600", trend: "待处理", up: false },
 ];
 
 const assigneeList = [
@@ -74,12 +74,22 @@ export default function TicketList() {
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
   const pageSize = 8;
 
-  const stats = useMemo(() => ({
-    total: feedbacks.length,
-    processing: feedbacks.filter((f) => ["pending", "processing", "teaching"].includes(f.status)).length,
-    closed: feedbacks.filter((f) => f.status === "closed").length,
-    urgent: feedbacks.filter((f) => (f.urgency === "urgent" || f.urgency === "high") && f.status !== "closed").length,
-  }), [feedbacks]);
+  const stats = useMemo(() => {
+    const today = new Date();
+    let overdue = 0, dueToday = 0;
+    feedbacks.forEach((f) => {
+      const s = getSlaStatus(f.promisedAt, f.status);
+      if (s === "overdue") overdue++;
+      if (s === "due_today") dueToday++;
+    });
+    return {
+      total: feedbacks.length,
+      processing: feedbacks.filter((f) => ["pending", "processing", "teaching"].includes(f.status)).length,
+      closed: feedbacks.filter((f) => f.status === "closed").length,
+      urgent: feedbacks.filter((f) => (f.urgency === "urgent" || f.urgency === "high") && f.status !== "closed").length,
+      overdue, dueToday,
+    };
+  }, [feedbacks]);
 
   const filtered = useMemo(() => feedbacks.filter((f) => {
     if (filters.status !== "all" && f.status !== filters.status) return false;
@@ -91,6 +101,15 @@ export default function TicketList() {
       if (!f.ticketNo.toLowerCase().includes(kw) && !f.studentName.toLowerCase().includes(kw) && !f.courseName.toLowerCase().includes(kw)) return false;
     }
     if (filters.dateRange !== "all" && !isInDateRange(f.createdAt, filters.dateRange!)) return false;
+    if (filters.sla && filters.sla !== "all") {
+      const s = getSlaStatus(f.promisedAt, f.status);
+      if (filters.sla === "overdue" && s !== "overdue") return false;
+      if (filters.sla === "due_today" && s !== "due_today" && s !== "overdue") return false;
+      if (filters.sla === "visit_today") {
+        const hasToday = (f.visits || []).some((v) => isSameDay(new Date(v.createdAt), new Date()));
+        if (!hasToday) return false;
+      }
+    }
     return true;
   }), [feedbacks, filters]);
 
@@ -182,8 +201,22 @@ export default function TicketList() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((sc) => {
           const Icon = sc.icon;
+          const isActive =
+            (sc.key === "overdue" && filters.sla === "overdue") ||
+            (sc.key === "dueToday" && filters.sla === "due_today");
           return (
-            <div key={sc.key} className="card p-5 flex items-center gap-4">
+            <div key={sc.key} className={cn(
+              "card p-5 flex items-center gap-4 cursor-pointer transition-all duration-200",
+              isActive ? "ring-2 ring-moss-500 ring-offset-2" : "hover:shadow-card"
+            )} onClick={() => {
+              if (sc.key === "overdue") {
+                setFilters({ sla: filters.sla === "overdue" ? "all" : "overdue" });
+                setCurrentPage(1);
+              } else if (sc.key === "dueToday") {
+                setFilters({ sla: filters.sla === "due_today" ? "all" : "due_today" });
+                setCurrentPage(1);
+              }
+            }}>
               <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center", sc.color)}>
                 <Icon className="w-5 h-5" />
               </div>
@@ -210,6 +243,32 @@ export default function TicketList() {
               {o.label}
             </Chip>
           ))}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 mr-2">
+            <Clock className="w-4 h-4 text-ink-400 shrink-0" />
+            <span className="text-xs font-medium text-ink-500">SLA 跟进</span>
+          </div>
+          <Chip active={filters.sla === "all" || !filters.sla}
+            onClick={() => { setFilters({ sla: "all" }); setCurrentPage(1); }}>
+            全部
+          </Chip>
+          <Chip active={filters.sla === "overdue"}
+            onClick={() => { setFilters({ sla: filters.sla === "overdue" ? "all" : "overdue" }); setCurrentPage(1); }}
+            ac="bg-ember-500 text-white border-ember-500 shadow-ember">
+            <AlertTriangle className="w-3.5 h-3.5" />已超时
+          </Chip>
+          <Chip active={filters.sla === "due_today"}
+            onClick={() => { setFilters({ sla: filters.sla === "due_today" ? "all" : "due_today" }); setCurrentPage(1); }}
+            ac="bg-amber-500 text-white border-amber-500">
+            <Clock className="w-3.5 h-3.5" />今天到期
+          </Chip>
+          <Chip active={filters.sla === "visit_today"}
+            onClick={() => { setFilters({ sla: filters.sla === "visit_today" ? "all" : "visit_today" }); setCurrentPage(1); }}
+            ac="bg-sky2-500 text-white border-sky2-500">
+            <Phone className="w-3.5 h-3.5" />今日回访
+          </Chip>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -294,7 +353,7 @@ export default function TicketList() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-cream-100/60 border-b border-cream-200">
-                {["", "工单编号", "学员", "课程", "类型", "满意度", "紧急度", "状态", "处理人", "来源", "创建时间"].map((h, i) => (
+                {["", "工单编号", "学员", "课程", "类型", "满意度", "紧急度", "SLA", "状态", "处理人", "来源", "创建时间"].map((h, i) => (
                   <th key={i} className={cn("py-3 px-4 text-left font-medium text-ink-500 text-xs uppercase tracking-wider", i === 0 && "w-12")}>
                     {h || "\u00a0"}
                   </th>
@@ -305,7 +364,7 @@ export default function TicketList() {
             <tbody>
               {pageData.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-16 text-center text-ink-400">
+                  <td colSpan={13} className="py-16 text-center text-ink-400">
                     <div className="flex flex-col items-center gap-2">
                       <Inbox className="w-10 h-10 text-ink-300" />
                       <p className="text-sm">暂无符合条件的工单</p>
@@ -343,6 +402,13 @@ export default function TicketList() {
                         <span className={ui.color}>
                           <span className={cn("w-1.5 h-1.5 rounded-full", ui.dot)} />{ui.label}
                         </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        {(() => {
+                          const s = getSlaStatus(fb.promisedAt, fb.status);
+                          const sl = getSlaLabel(s);
+                          return sl.label ? <span className={sl.color}>{sl.label}</span> : <span className="text-xs text-ink-300">—</span>;
+                        })()}
                       </td>
                       <td className="py-3 px-4"><span className={si.color}>{si.label}</span></td>
                       <td className="py-3 px-4">

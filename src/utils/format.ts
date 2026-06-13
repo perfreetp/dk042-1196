@@ -75,3 +75,38 @@ export const cn = (...classes: (string | false | undefined | null)[]) =>
   classes.filter(Boolean).join(" ");
 
 export const generateId = () => Math.random().toString(36).slice(2, 10);
+
+export const isSameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
+
+export type SlaStatus = "overdue" | "due_today" | "due_soon" | "none";
+
+export const getSlaStatus = (promisedAt?: string, status?: string): SlaStatus => {
+  if (!promisedAt || status === "closed") return "none";
+  const due = new Date(promisedAt);
+  if (isNaN(due.getTime())) return "none";
+  const now = new Date();
+  due.setHours(23, 59, 59, 999);
+  const diffMs = due.getTime() - now.getTime();
+  const diffDays = diffMs / 86400000;
+  if (diffDays < 0) return "overdue";
+  if (isSameDay(due, now)) return "due_today";
+  if (diffDays <= 2) return "due_soon";
+  return "none";
+};
+
+export const getSlaLabel = (s: SlaStatus) => {
+  switch (s) {
+    case "overdue": return { label: "已超时", color: "chip bg-ember-500 text-white shadow-ember" };
+    case "due_today": return { label: "今天到期", color: "chip bg-ember-100 text-ember-700 border border-ember-200" };
+    case "due_soon": return { label: "即将到期", color: "chip bg-amber-50 text-amber-700 border border-amber-200" };
+    default: return { label: "", color: "" };
+  }
+};
+
+export const hasVisitToday = (visits: { createdAt: string }[]) => {
+  const today = new Date();
+  return visits.some((v) => isSameDay(new Date(v.createdAt), today));
+};
